@@ -1,0 +1,32 @@
+# QEMU images (binary lớn)
+*.qcow2
+*.qcow2.bak
+*.raw
+*.iso
+*.img
+
+# Boot files extracted from image
+task1-qemu-kvm/boot/
+
+# PID files
+*.pid
+
+# Logs
+*.log
+
+# OS / Editor
+.DS_Store
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Kernel source (từ lab 1)
+linux-*/
+*.tar.xz
+*.tar.gz
+*.tar.bz2
+*.rpm
+rpmbuild/
+repodata/
