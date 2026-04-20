@@ -30,3 +30,9 @@ linux-*/
 *.rpm
 rpmbuild/
 repodata/
+
+# Task 3 - VPP
+task3-vpp/images/
+task3-vpp/*.qcow2
+task3-vpp/*.log
+task3-vpp/*.pid
