@@ -148,10 +148,6 @@ It validates:
 - Required files (images/kernel/initrd)
 - Required network interfaces (for example `tap0`, `tap1`)
 
-## Scan Summary (Current Repository)
-
-No syntax-level Bash issues were validated automatically in this environment (Linux shell tools are not available in the current Windows terminal session), but a full manual scan of all repository files was completed.
-
 ### Completed Improvements
 
 1. Replaced hardcoded workspace paths with script-relative path discovery in launch scripts.
