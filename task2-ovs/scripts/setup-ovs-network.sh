@@ -2,10 +2,10 @@
 # ===========================================================
 # Lab 2 - Task 2: Setup OVS Bridge + TAP interfaces
 # ===========================================================
-# Tạo OVS bridge (ovs-br0) thay thế Linux Bridge từ Task 1
-# Kết nối 2 VMs qua TAP interfaces
+# Create OVS bridge (ovs-br0) to replace Linux Bridge from Task 1
+# Connect 2 VMs through TAP interfaces
 #
-# Yêu cầu: openvswitch đã cài và đang chạy
+# Requirement: openvswitch is installed and running
 # ===========================================================
 
 set -euo pipefail
@@ -17,37 +17,38 @@ echo "============================================"
 echo "  Task 2: Setup OVS Network"
 echo "============================================"
 
-# Kiểm tra OVS service
+# Check OVS service
 if ! systemctl is-active --quiet openvswitch; then
     echo "ERROR: openvswitch service not running!"
     echo "Run: sudo systemctl enable --now openvswitch"
     exit 1
 fi
 
-# Xóa bridge cũ nếu tồn tại
+# Remove old bridge if it exists
 ovs-vsctl --if-exists del-br "$BRIDGE"
 
-# Xóa TAP cũ
+# Remove old TAP interfaces
 ip link delete tap0 2>/dev/null || true
 ip link delete tap1 2>/dev/null || true
 
-# Tạo OVS bridge
+# Create OVS bridge
 ovs-vsctl add-br "$BRIDGE"
 
-# Tạo TAP interfaces
+# Create TAP interfaces
 ip tuntap add dev tap0 mode tap
 ip tuntap add dev tap1 mode tap
 
-# Gắn TAP vào OVS bridge
+# Attach TAP interfaces to OVS bridge
 ovs-vsctl add-port "$BRIDGE" tap0
 ovs-vsctl add-port "$BRIDGE" tap1
 
-# Bật interfaces
+# Bring interfaces up
 ip link set "$BRIDGE" up
 ip link set tap0 up
 ip link set tap1 up
 
-# Gán IP cho bridge (host connectivity)
+# Assign IP to bridge (host connectivity)
+ip addr flush dev "$BRIDGE" 2>/dev/null || true
 ip addr add "$BRIDGE_IP" dev "$BRIDGE"
 
 echo ""

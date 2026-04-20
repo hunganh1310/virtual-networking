@@ -4,17 +4,28 @@
 # ===========================================================
 set -euo pipefail
 
-WORK_DIR=~/telco-lab/virtual-networking/task1-qemu-kvm
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+WORK_DIR="$REPO_ROOT/task1-qemu-kvm"
+PREFLIGHT_SCRIPT="$REPO_ROOT/scripts/preflight.sh"
+
+if [[ ! -f "$PREFLIGHT_SCRIPT" ]]; then
+  echo "ERROR: Preflight script not found: $PREFLIGHT_SCRIPT"
+  exit 1
+fi
+
+source "$PREFLIGHT_SCRIPT"
+
 IMG_PATH="$WORK_DIR/images/vm2.qcow2"
 KERNEL="$WORK_DIR/boot/vmlinuz"
 INITRD="$WORK_DIR/boot/initrd"
 
-for f in "$IMG_PATH" "$KERNEL" "$INITRD"; do
-  if [[ ! -f "$f" ]]; then
-    echo "❌ Missing: $f"
-    exit 1
-  fi
-done
+check_files_exist "$IMG_PATH" "$KERNEL" "$INITRD" || exit 1
+check_interfaces_exist tap1 || {
+  echo "ERROR: tap1 not found. Create TAP interfaces before launching VMs."
+  exit 1
+}
+check_commands qemu-system-x86_64 || exit 1
 
 echo "============================================"
 echo "  Launching VM2 on tap1 (VPP scenario)"

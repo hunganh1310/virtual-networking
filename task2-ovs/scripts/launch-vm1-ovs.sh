@@ -10,17 +10,26 @@
 
 set -euo pipefail
 
-WORK_DIR=~/telco-lab/virtual-networking/task1-qemu-kvm
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+WORK_DIR="$REPO_ROOT/task1-qemu-kvm"
+PREFLIGHT_SCRIPT="$REPO_ROOT/scripts/preflight.sh"
+
+if [[ ! -f "$PREFLIGHT_SCRIPT" ]]; then
+    echo "ERROR: Preflight script not found: $PREFLIGHT_SCRIPT"
+    exit 1
+fi
+
+source "$PREFLIGHT_SCRIPT"
+
 IMAGE="$WORK_DIR/images/vm1.qcow2"
 BOOT_DIR="$WORK_DIR/boot"
 KERNEL="$BOOT_DIR/vmlinuz"
 INITRD="$BOOT_DIR/initrd"
 
-for f in "$IMAGE" "$KERNEL" "$INITRD"; do
-    [[ -f "$f" ]] || { echo "ERROR: $f not found"; exit 1; }
-done
-
-ip link show tap0 &>/dev/null || { echo "ERROR: tap0 not found. Run setup-ovs-network.sh first!"; exit 1; }
+check_files_exist "$IMAGE" "$KERNEL" "$INITRD" || exit 1
+check_interfaces_exist tap0 || { echo "ERROR: tap0 not found. Run setup-ovs-network.sh first!"; exit 1; }
+check_commands qemu-system-x86_64 || exit 1
 
 echo "============================================"
 echo "  VM1 (UPF) — OVS Bridge — FOREGROUND"

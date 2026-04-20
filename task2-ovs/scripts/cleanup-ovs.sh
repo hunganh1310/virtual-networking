@@ -4,7 +4,17 @@
 # ===========================================================
 
 echo "=== Killing VMs ==="
-kill $(cat /tmp/vm2.pid) 2>/dev/null && echo "VM2 killed" || echo "VM2 not running"
+if [[ -f /tmp/vm2.pid ]]; then
+	VM2_PID=$(cat /tmp/vm2.pid)
+	if kill -0 "$VM2_PID" 2>/dev/null; then
+		kill "$VM2_PID" && echo "VM2 killed"
+	else
+		echo "VM2 pid file exists but process is not running"
+	fi
+	rm -f /tmp/vm2.pid
+else
+	echo "VM2 not running"
+fi
 pkill -f "qemu.*vm1" 2>/dev/null && echo "VM1 killed" || echo "VM1 not running"
 sleep 1
 

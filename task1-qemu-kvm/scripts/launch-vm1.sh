@@ -2,39 +2,44 @@
 # ===========================================================
 # Lab 2 - Task 1: Launch VM1 (UPF) — FOREGROUND
 # ===========================================================
-# VM1 đóng vai trò "UPF" (User Plane Function)
+# VM1 acts as "UPF" (User Plane Function)
 # - IP: 10.0.0.1/24
 # - TAP: tap0 → br-test
-# - Console: serial trực tiếp (foreground)
+# - Console: direct serial (foreground)
 #
-# Cách dùng:   ./launch-vm1.sh
-# Thoát VM:    Ctrl+A, X
+# Usage:       ./launch-vm1.sh
+# Exit VM:     Ctrl+A, X
 # ===========================================================
-# NOTE: Boot trực tiếp bằng -kernel/-initrd (bypass GRUB)
-# vì nested KVM (WSL2) không hỗ trợ intel_iommu=on trong GRUB config.
+# NOTE: Boot directly with -kernel/-initrd (bypass GRUB)
+# because nested KVM (WSL2) does not support intel_iommu=on in GRUB config.
 # ===========================================================
 
 set -euo pipefail
 
-WORK_DIR=~/telco-lab/virtual-networking/task1-qemu-kvm
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORK_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+PREFLIGHT_SCRIPT="$(cd "$SCRIPT_DIR/../.." && pwd)/scripts/preflight.sh"
+
+if [[ ! -f "$PREFLIGHT_SCRIPT" ]]; then
+    echo "ERROR: Preflight script not found: $PREFLIGHT_SCRIPT"
+    exit 1
+fi
+
+source "$PREFLIGHT_SCRIPT"
+
 IMAGE="$WORK_DIR/images/vm1.qcow2"
 BOOT_DIR="$WORK_DIR/boot"
 KERNEL="$BOOT_DIR/vmlinuz"
 INITRD="$BOOT_DIR/initrd"
 
-# Kiểm tra files
-for f in "$IMAGE" "$KERNEL" "$INITRD"; do
-    if [[ ! -f "$f" ]]; then
-        echo "ERROR: File not found: $f"
-        exit 1
-    fi
-done
-
-# Kiểm tra TAP interface
-if ! ip link show tap0 &>/dev/null; then
+# Check files and required interface
+check_files_exist "$IMAGE" "$KERNEL" "$INITRD" || exit 1
+check_interfaces_exist tap0 || {
     echo "ERROR: tap0 not found. Run setup-network.sh first!"
     exit 1
-fi
+}
+
+check_commands qemu-system-x86_64 || exit 1
 
 echo "============================================"
 echo "  Launching VM1 (UPF) — FOREGROUND"
@@ -45,7 +50,7 @@ echo "  vCPUs  : 2"
 echo "  NIC    : virtio → tap0 → br-test"
 echo "============================================"
 echo ""
-echo "  Console: serial (Ctrl+A, X để thoát)"
+echo "  Console: serial (Ctrl+A, X to exit)"
 echo "  Login  : root / linux"
 echo "============================================"
 
