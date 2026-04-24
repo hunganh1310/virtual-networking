@@ -1,0 +1,127 @@
+#cloud-config
+# ============================================================================
+# cloud-init/vm-base.yaml — Base user-data for virtual networking VMs
+# ============================================================================
+# Provides automatic network configuration, SSH setup, and iperf3 installation
+# so VMs are immediately usable after boot without manual console access.
+#
+# USAGE:
+#   1. Generate a seed ISO:     ./cloud-init/gen-cidata.sh ovs vm1
+#   2. Attach to VM launch:     Edit topology YAML to add: use_cloud_init: true
+#
+# REQUIREMENTS:
+#   - VM image must have cloud-init installed (cloud images, not bare JeOS)
+#   - For JeOS images: install cloud-init via: zypper install cloud-init
+#
+# Reference: https://cloudinit.readthedocs.io/en/latest/reference/
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+# System Configuration
+# ---------------------------------------------------------------------------
+hostname: vm-nfv
+fqdn: vm-nfv.local
+manage_etc_hosts: true
+
+# ---------------------------------------------------------------------------
+# User Setup
+# ---------------------------------------------------------------------------
+users:
+  - name: root
+    lock_passwd: false
+    hashed_passwd: "$6$rounds=4096$saltsalt$hashedpassword"  # placeholder — overridden by gen-cidata.sh
+    # Plain password (for lab use only — DO NOT use in production):
+    plain_text_passwd: "linux"
+    ssh_authorized_keys: []   # Add your public key here for key-based access
+
+  - name: nfv
+    groups: [sudo, adm]
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    plain_text_passwd: "nfv"
+    lock_passwd: false
+
+# Allow password authentication (lab environment)
+ssh_pwauth: true
+
+# ---------------------------------------------------------------------------
+# Package Installation
+# ---------------------------------------------------------------------------
+# Packages needed for NFV benchmarking
+packages:
+  - iperf3          # Network throughput testing
+  - iputils-ping    # Ping / latency testing
+  - tcpdump         # Packet capture
+  - ethtool         # NIC statistics
+  - iproute2        # ip, ss, tc commands
+
+package_update: true
+package_upgrade: false  # Skip full upgrade to keep boot time fast
+
+# ---------------------------------------------------------------------------
+# Network Configuration (injected by gen-cidata.sh per-VM)
+# ---------------------------------------------------------------------------
+# This section is overridden dynamically by gen-cidata.sh based on topology.
+# The placeholder below documents the expected structure.
+write_files:
+  - path: /etc/network/interfaces.d/eth0
+    content: |
+      # Auto-configured by cloud-init via gen-cidata.sh
+      # Actual IP/gateway injected per topology VM definition
+      auto eth0
+      iface eth0 inet static
+        address __VM_IP__
+        netmask 255.255.255.0
+        gateway __GATEWAY_IP__
+
+  - path: /etc/sysctl.d/99-nfv.conf
+    content: |
+      # Performance tuning for NFV workloads
+      net.core.rmem_max = 67108864
+      net.core.wmem_max = 67108864
+      net.ipv4.tcp_rmem = 4096 87380 67108864
+      net.ipv4.tcp_wmem = 4096 65536 67108864
+      net.core.netdev_max_backlog = 5000
+
+  - path: /usr/local/bin/start-iperf-server
+    permissions: "0755"
+    content: |
+      #!/bin/bash
+      # Convenience script: start iperf3 server for benchmarking
+      exec iperf3 -s -D --logfile /tmp/iperf3-server.log
+      echo "iperf3 server started (background)"
+      echo "Log: /tmp/iperf3-server.log"
+
+# ---------------------------------------------------------------------------
+# Run Commands (on first boot)
+# ---------------------------------------------------------------------------
+runcmd:
+  # Apply sysctl tuning
+  - sysctl -p /etc/sysctl.d/99-nfv.conf
+
+  # Bring up network interface (in case auto-start missed it)
+  - ip link set eth0 up || true
+
+  # Configure IP (actual values injected by gen-cidata.sh)
+  - ip addr add __VM_IP__/24 dev eth0 2>/dev/null || true
+  - ip route add default via __GATEWAY_IP__ 2>/dev/null || true
+
+  # Start iperf3 server automatically for benchmark readiness
+  - iperf3 -s -D --logfile /tmp/iperf3-server.log
+
+  # Motd
+  - |
+    cat > /etc/motd << 'MOTD'
+    ┌──────────────────────────────────────────┐
+    │    NFV Virtual Networking Lab — VM        │
+    │    iperf3 server: running (port 5201)     │
+    │    Benchmark: sudo ./vnctl bench run ovs  │
+    └──────────────────────────────────────────┘
+    MOTD
+
+# ---------------------------------------------------------------------------
+# Final Message
+# ---------------------------------------------------------------------------
+final_message: |
+  NFV VM is ready after $UPTIME seconds.
+  iperf3 server: running | IP: $(ip -4 addr show eth0 | grep inet | awk '{print $2}')

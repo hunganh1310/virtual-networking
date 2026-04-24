@@ -1,20 +1,40 @@
-# QEMU images (binary lớn)
+# ============================================================================
+# Virtual Networking Lab — .gitignore
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+# VM Images (large binaries)
+# ---------------------------------------------------------------------------
 *.qcow2
 *.qcow2.bak
 *.raw
 *.iso
 *.img
 
-# Boot files extracted from image
-task1-qemu-kvm/boot/
+# ---------------------------------------------------------------------------
+# Boot files (extracted from images)
+# ---------------------------------------------------------------------------
+boot/vmlinuz
+boot/initrd
+legacy/task1-qemu-kvm/boot/
 
-# PID files
+# ---------------------------------------------------------------------------
+# Runtime files
+# ---------------------------------------------------------------------------
 *.pid
-
-# Logs
 *.log
+*.sock
 
+# ---------------------------------------------------------------------------
+# Benchmark results (keep structure, ignore large data)
+# results/ is tracked but individual run dirs may be large
+# ---------------------------------------------------------------------------
+results/*/2*-*/           # Timestamped run directories
+results/comparison/2*-*   # Timestamped comparison reports
+
+# ---------------------------------------------------------------------------
 # OS / Editor
+# ---------------------------------------------------------------------------
 .DS_Store
 *.swp
 *.swo
@@ -22,7 +42,9 @@ task1-qemu-kvm/boot/
 .vscode/
 .idea/
 
-# Kernel source (từ lab 1)
+# ---------------------------------------------------------------------------
+# Build artifacts
+# ---------------------------------------------------------------------------
 linux-*/
 *.tar.xz
 *.tar.gz
@@ -31,8 +53,11 @@ linux-*/
 rpmbuild/
 repodata/
 
-# Task 3 - VPP
-task3-vpp/images/
-task3-vpp/*.qcow2
-task3-vpp/*.log
-task3-vpp/*.pid
+# ---------------------------------------------------------------------------
+# Legacy images and data
+# ---------------------------------------------------------------------------
+legacy/task1-qemu-kvm/images/
+legacy/task3-vpp/images/
+legacy/task3-vpp/*.qcow2
+legacy/task3-vpp/*.log
+legacy/task3-vpp/*.pid

@@ -1,0 +1,634 @@
+#!/usr/bin/env bash
+# ============================================================================
+# vnctl — Unified CLI for Virtual Networking Lab
+# ============================================================================
+# Single entry point for deploying network topologies, managing VMs, and
+# running performance benchmarks across Linux Bridge, OVS, and VPP engines.
+#
+# Usage: ./vnctl <command> [subcommand] [options]
+#
+# Examples:
+#   sudo ./vnctl deploy ovs              # Deploy OVS topology
+#   sudo ./vnctl vm start vm1            # Launch VM1 (foreground)
+#   sudo ./vnctl vm start vm2 --bg       # Launch VM2 (background)
+#   sudo ./vnctl bench run ovs           # Run benchmarks on OVS
+#   sudo ./vnctl teardown ovs            # Tear down OVS topology
+#   ./vnctl doctor                       # Check system readiness
+# ============================================================================
+
+set -euo pipefail
+
+# vnctl version
+readonly VNCTL_VERSION="1.1.0"
+
+# Resolve project root from this script's location
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export PROJECT_ROOT="$SCRIPT_DIR"
+
+# Source core libraries
+source "${SCRIPT_DIR}/lib/common.sh"
+source "${SCRIPT_DIR}/lib/config.sh"
+source "${SCRIPT_DIR}/lib/network.sh"
+source "${SCRIPT_DIR}/lib/vm.sh"
+
+# ---------------------------------------------------------------------------
+# Topology Resolution
+# ---------------------------------------------------------------------------
+
+# Map short topology names to YAML files
+_resolve_topology() {
+    local name="$1"
+    local topology_file=""
+
+    case "$name" in
+        linux-bridge|lb|bridge)
+            topology_file="${TOPOLOGY_DIR}/linux-bridge.yaml"
+            ;;
+        ovs|openvswitch)
+            topology_file="${TOPOLOGY_DIR}/ovs-bridge.yaml"
+            ;;
+        vpp)
+            topology_file="${TOPOLOGY_DIR}/vpp-bridge.yaml"
+            ;;
+        *.yaml|*.yml)
+            # Direct path to a YAML file
+            topology_file="$name"
+            if [[ "$topology_file" != /* ]]; then
+                topology_file="${PROJECT_ROOT}/${topology_file}"
+            fi
+            ;;
+        *)
+            log_error "Unknown topology: '${name}'"
+            log_error "Available: linux-bridge (lb), ovs, vpp"
+            return 1
+            ;;
+    esac
+
+    if [[ ! -f "$topology_file" ]]; then
+        log_error "Topology file not found: ${topology_file}"
+        return 1
+    fi
+
+    echo "$topology_file"
+}
+
+# Get engine name from topology file
+_get_engine() {
+    local topology_file="$1"
+    config_load "$topology_file"
+    config_require "engine"
+}
+
+# Source the appropriate engine
+_load_engine() {
+    local engine="$1"
+    local engine_file="${ENGINE_DIR}/${engine}.sh"
+
+    if [[ ! -f "$engine_file" ]]; then
+        log_error "Engine '${engine}' not found: ${engine_file}"
+        return 1
+    fi
+
+    source "$engine_file"
+}
+
+# ---------------------------------------------------------------------------
+# Commands: deploy / teardown / status
+# ---------------------------------------------------------------------------
+
+cmd_deploy() {
+    local topology_name="${1:-}"
+    local dry_run=false
+
+    # Parse flags
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --dry-run) dry_run=true; shift ;;
+            *) topology_name="$1"; shift ;;
+        esac
+    done
+
+    if [[ -z "$topology_name" ]]; then
+        log_error "Usage: vnctl deploy <topology> [--dry-run]"
+        log_error "Topologies: linux-bridge (lb), ovs, vpp"
+        return 1
+    fi
+
+    local topology_file engine
+    topology_file=$(_resolve_topology "$topology_name") || return 1
+    engine=$(_get_engine "$topology_file") || return 1
+    _load_engine "$engine" || return 1
+
+    if $dry_run; then
+        log_header "DRY RUN — ${engine}"
+        config_load "$topology_file"
+        config_dump
+        log_info "Would deploy engine '${engine}' from: ${topology_file}"
+        return 0
+    fi
+
+    # Dispatch to engine setup
+    case "$engine" in
+        linux-bridge) lb_setup "$topology_file" ;;
+        ovs)          ovs_setup "$topology_file" ;;
+        vpp)          vpp_setup "$topology_file" ;;
+        *)            log_error "Unknown engine: ${engine}"; return 1 ;;
+    esac
+}
+
+cmd_teardown() {
+    local topology_name="${1:-}"
+
+    if [[ -z "$topology_name" ]]; then
+        log_error "Usage: vnctl teardown <topology>"
+        return 1
+    fi
+
+    local topology_file engine
+    topology_file=$(_resolve_topology "$topology_name") || return 1
+    engine=$(_get_engine "$topology_file") || return 1
+    _load_engine "$engine" || return 1
+
+    # Stop VMs first
+    log_info "Stopping all VMs before teardown..."
+    vm_stop all
+
+    # Dispatch to engine teardown
+    case "$engine" in
+        linux-bridge) lb_teardown "$topology_file" ;;
+        ovs)          ovs_teardown "$topology_file" ;;
+        vpp)          vpp_teardown "$topology_file" ;;
+        *)            log_error "Unknown engine: ${engine}"; return 1 ;;
+    esac
+}
+
+cmd_status() {
+    local topology_name="${1:-}"
+
+    if [[ -z "$topology_name" ]]; then
+        # Show general status
+        vm_list
+        return 0
+    fi
+
+    local topology_file engine
+    topology_file=$(_resolve_topology "$topology_name") || return 1
+    engine=$(_get_engine "$topology_file") || return 1
+    _load_engine "$engine" || return 1
+
+    case "$engine" in
+        linux-bridge) lb_status "$topology_file" ;;
+        ovs)          ovs_status "$topology_file" ;;
+        vpp)          vpp_status "$topology_file" ;;
+        *)            log_error "Unknown engine: ${engine}"; return 1 ;;
+    esac
+
+    vm_list
+}
+
+# ---------------------------------------------------------------------------
+# Commands: vm
+# ---------------------------------------------------------------------------
+
+cmd_vm() {
+    local subcmd="${1:-}"
+    shift || true
+
+    case "$subcmd" in
+        start|launch)
+            cmd_vm_start "$@"
+            ;;
+        stop|kill)
+            cmd_vm_stop "$@"
+            ;;
+        list|ls)
+            vm_list
+            ;;
+        console|attach)
+            cmd_vm_console "$@"
+            ;;
+        *)
+            log_error "Usage: vnctl vm <start|stop|list|console> [options]"
+            echo ""
+            echo "  start <name> [--bg] [--topology <topo>]   Launch a VM"
+            echo "  stop  <name|all>                          Stop VM(s)"
+            echo "  list                                      List running VMs"
+            echo "  console <name>                            Attach to VM console"
+            return 1
+            ;;
+    esac
+}
+
+cmd_vm_start() {
+    local vm_name="" topology_name="" background=false
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --bg|--background) background=true; shift ;;
+            --topology|-t)     topology_name="$2"; shift 2 ;;
+            -*)                log_error "Unknown option: $1"; return 1 ;;
+            *)                 vm_name="$1"; shift ;;
+        esac
+    done
+
+    if [[ -z "$vm_name" ]]; then
+        log_error "Usage: vnctl vm start <vm_name> [--bg] [--topology <topo>]"
+        return 1
+    fi
+
+    # Auto-detect topology if not specified
+    if [[ -z "$topology_name" ]]; then
+        # Look for a running engine or default to checking all topologies
+        for topo in linux-bridge ovs vpp; do
+            local topo_file
+            topo_file=$(_resolve_topology "$topo" 2>/dev/null) || continue
+            config_load "$topo_file" 2>/dev/null || continue
+            local vm_check
+            vm_check=$(config_get "vms.${vm_name}.mac" "")
+            if [[ -n "$vm_check" ]]; then
+                topology_name="$topo"
+                break
+            fi
+        done
+
+        if [[ -z "$topology_name" ]]; then
+            log_error "Cannot find VM '${vm_name}' in any topology."
+            log_error "Specify topology: vnctl vm start ${vm_name} --topology ovs"
+            return 1
+        fi
+    fi
+
+    local topology_file
+    topology_file=$(_resolve_topology "$topology_name") || return 1
+    config_load "$topology_file" || return 1
+
+    # Override mode if --bg flag is set
+    if $background; then
+        # Temporarily modify the cached mode
+        _CONFIG_CACHE["vms.${vm_name}.mode"]="background"
+    fi
+
+    vm_launch "$vm_name"
+}
+
+cmd_vm_stop() {
+    local target="${1:-}"
+
+    if [[ -z "$target" ]]; then
+        log_error "Usage: vnctl vm stop <vm_name|all>"
+        return 1
+    fi
+
+    vm_stop "$target"
+}
+
+cmd_vm_console() {
+    local vm_name="${1:-}"
+
+    if [[ -z "$vm_name" ]]; then
+        log_error "Usage: vnctl vm console <vm_name>"
+        return 1
+    fi
+
+    vm_console "$vm_name"
+}
+
+# ---------------------------------------------------------------------------
+# Commands: bench
+# ---------------------------------------------------------------------------
+
+cmd_bench() {
+    local subcmd="${1:-}"
+    shift || true
+
+    # Source benchmark library
+    source "${LIB_DIR}/benchmark.sh" 2>/dev/null || {
+        log_error "Benchmark library not found."
+        return 1
+    }
+
+    case "$subcmd" in
+        run)
+            cmd_bench_run "$@"
+            ;;
+        compare)
+            cmd_bench_compare "$@"
+            ;;
+        stats)
+            cmd_bench_stats "$@"
+            ;;
+        *)
+            log_error "Usage: vnctl bench <run|compare|stats> [options]"
+            echo ""
+            echo "  run <topology>   Run full benchmark suite"
+            echo "  compare          Generate OVS vs VPP comparison report"
+            echo "  stats            Collect runtime stats from active engine"
+            return 1
+            ;;
+    esac
+}
+
+cmd_bench_run() {
+    local topology_name="${1:-}"
+
+    # Special: run all engines sequentially
+    if [[ "$topology_name" == "--all" ]]; then
+        log_header "Benchmark — All Engines"
+        local failed=()
+        for topo in linux-bridge ovs vpp; do
+            echo ""
+            log_step "${topo}" "Running benchmark suite"
+            local topo_file
+            topo_file=$(_resolve_topology "$topo" 2>/dev/null) || {
+                log_warn "Topology '${topo}' not found, skipping."
+                continue
+            }
+            source "${PROJECT_ROOT}/benchmark/run-benchmark.sh"
+            benchmark_run "$topo_file" || failed+=("$topo")
+        done
+        echo ""
+        if [[ ${#failed[@]} -gt 0 ]]; then
+            log_warn "Failed engines: ${failed[*]}"
+        fi
+        # Generate comparison after all runs
+        log_info "Generating comparison report..."
+        cmd_bench_compare
+        return 0
+    fi
+
+    if [[ -z "$topology_name" ]]; then
+        log_error "Usage: vnctl bench run <topology|--all>"
+        return 1
+    fi
+
+    local topology_file
+    topology_file=$(_resolve_topology "$topology_name") || return 1
+
+    source "${PROJECT_ROOT}/benchmark/run-benchmark.sh"
+    benchmark_run "$topology_file"
+}
+
+cmd_bench_stats() {
+    local topology_name="${1:-}"
+
+    source "${PROJECT_ROOT}/benchmark/collect-stats.sh"
+
+    if [[ -n "$topology_name" ]]; then
+        local topology_file
+        topology_file=$(_resolve_topology "$topology_name") || return 1
+        stats_collect "$topology_file"
+    else
+        stats_collect_auto
+    fi
+}
+
+cmd_bench_compare() {
+    source "${PROJECT_ROOT}/benchmark/compare-report.sh"
+    generate_comparison_report
+}
+
+# ---------------------------------------------------------------------------
+# Commands: validate / doctor
+# ---------------------------------------------------------------------------
+
+cmd_validate() {
+    log_header "Configuration Validation"
+
+    local errors=0
+    for topo_file in "${TOPOLOGY_DIR}"/*.yaml; do
+        [[ -f "$topo_file" ]] || continue
+        local name
+        name=$(basename "$topo_file")
+        echo -n "  Validating ${name}... "
+        if config_validate "$topo_file" 2>/dev/null; then
+            echo -e "${_CLR_GREEN}OK${_CLR_RESET}"
+        else
+            echo -e "${_CLR_RED}FAILED${_CLR_RESET}"
+            errors=$((errors + 1))
+        fi
+    done
+
+    echo ""
+    if [[ $errors -gt 0 ]]; then
+        log_error "${errors} topology file(s) failed validation."
+        return 1
+    fi
+    log_success "All topology files validated successfully."
+}
+
+cmd_doctor() {
+    log_header "System Readiness Check"
+    echo ""
+
+    local warnings=0 errors=0
+
+    # Kernel
+    echo -n "  KVM support (/dev/kvm).............. "
+    if [[ -c /dev/kvm ]]; then
+        echo -e "${_CLR_GREEN}OK${_CLR_RESET}"
+    else
+        echo -e "${_CLR_RED}MISSING${_CLR_RESET}"
+        errors=$((errors + 1))
+    fi
+
+    # QEMU
+    echo -n "  qemu-system-x86_64.................. "
+    if command -v qemu-system-x86_64 &>/dev/null; then
+        echo -e "${_CLR_GREEN}$(qemu-system-x86_64 --version | head -1 | awk '{print $4}')${_CLR_RESET}"
+    else
+        echo -e "${_CLR_RED}NOT FOUND${_CLR_RESET}"
+        errors=$((errors + 1))
+    fi
+
+    # OVS
+    echo -n "  Open vSwitch (ovs-vsctl)............ "
+    if command -v ovs-vsctl &>/dev/null; then
+        local ovs_ver
+        ovs_ver=$(ovs-vsctl --version | head -1 | awk '{print $NF}')
+        if systemctl is-active --quiet openvswitch 2>/dev/null; then
+            echo -e "${_CLR_GREEN}${ovs_ver} (running)${_CLR_RESET}"
+        else
+            echo -e "${_CLR_YELLOW}${ovs_ver} (stopped)${_CLR_RESET}"
+            warnings=$((warnings + 1))
+        fi
+    else
+        echo -e "${_CLR_YELLOW}NOT INSTALLED${_CLR_RESET}"
+        warnings=$((warnings + 1))
+    fi
+
+    # VPP
+    echo -n "  FD.io VPP (vpp)..................... "
+    if command -v vpp &>/dev/null; then
+        local vpp_ver
+        vpp_ver=$(vpp --version 2>/dev/null | head -1 || echo "installed")
+        echo -e "${_CLR_GREEN}${vpp_ver}${_CLR_RESET}"
+    else
+        echo -e "${_CLR_YELLOW}NOT INSTALLED${_CLR_RESET}"
+        warnings=$((warnings + 1))
+    fi
+
+    # iperf3
+    echo -n "  iperf3.............................. "
+    if command -v iperf3 &>/dev/null; then
+        echo -e "${_CLR_GREEN}$(iperf3 --version 2>&1 | head -1 | awk '{print $2}')${_CLR_RESET}"
+    else
+        echo -e "${_CLR_YELLOW}NOT INSTALLED${_CLR_RESET}"
+        warnings=$((warnings + 1))
+    fi
+
+    # yq (YAML parser)
+    echo -n "  yq (YAML parser).................... "
+    if command -v yq &>/dev/null; then
+        echo -e "${_CLR_GREEN}$(yq --version 2>&1 | awk '{print $NF}')${_CLR_RESET}"
+    else
+        echo -e "${_CLR_YELLOW}NOT INSTALLED (using awk fallback)${_CLR_RESET}"
+        warnings=$((warnings + 1))
+    fi
+
+    # jq (JSON processor — needed for compare-report)
+    echo -n "  jq (JSON processor)................. "
+    if command -v jq &>/dev/null; then
+        echo -e "${_CLR_GREEN}$(jq --version 2>&1)${_CLR_RESET}"
+    else
+        echo -e "${_CLR_YELLOW}NOT INSTALLED (bench compare metrics unavailable)${_CLR_RESET}"
+        echo -e "           ${_CLR_DIM}Install: pip install jq  OR  zypper install jq${_CLR_RESET}"
+        warnings=$((warnings + 1))
+    fi
+
+    # HugePages
+    echo -n "  HugePages........................... "
+    local hp_total hp_free
+    hp_total=$(cat /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages 2>/dev/null || echo "0")
+    hp_free=$(cat /sys/kernel/mm/hugepages/hugepages-2048kB/free_hugepages 2>/dev/null || echo "0")
+    if [[ "$hp_total" -gt 0 ]]; then
+        echo -e "${_CLR_GREEN}${hp_free}/${hp_total} free (2MB pages)${_CLR_RESET}"
+    else
+        echo -e "${_CLR_DIM}disabled${_CLR_RESET}"
+    fi
+
+    # VM images
+    echo -n "  VM images (images/)................. "
+    local img_count
+    img_count=$(find -L "${IMAGES_DIR}" -name "*.qcow2" 2>/dev/null | wc -l)
+    if [[ "$img_count" -gt 0 ]]; then
+        echo -e "${_CLR_GREEN}${img_count} image(s) found${_CLR_RESET}"
+    else
+        echo -e "${_CLR_RED}NO IMAGES${_CLR_RESET}"
+        errors=$((errors + 1))
+    fi
+
+    # Boot files
+    echo -n "  Kernel (boot/vmlinuz)............... "
+    if [[ -e "${BOOT_DIR}/vmlinuz" ]]; then
+        echo -e "${_CLR_GREEN}present${_CLR_RESET}"
+    else
+        echo -e "${_CLR_RED}MISSING${_CLR_RESET}"
+        errors=$((errors + 1))
+    fi
+
+    echo -n "  Initrd (boot/initrd)................ "
+    if [[ -e "${BOOT_DIR}/initrd" ]]; then
+        echo -e "${_CLR_GREEN}present${_CLR_RESET}"
+    else
+        echo -e "${_CLR_RED}MISSING${_CLR_RESET}"
+        errors=$((errors + 1))
+    fi
+
+    # Summary
+    echo ""
+    if [[ $errors -gt 0 ]]; then
+        log_error "${errors} critical issue(s) found."
+    fi
+    if [[ $warnings -gt 0 ]]; then
+        log_warn "${warnings} warning(s) — optional components not installed."
+    fi
+    if [[ $errors -eq 0 ]]; then
+        log_success "System is ready for virtual networking."
+    fi
+    echo ""
+}
+
+# ---------------------------------------------------------------------------
+# Help
+# ---------------------------------------------------------------------------
+
+cmd_help() {
+    cat << EOF
+
+  ╔══════════════════════════════════════════════════════╗
+  ║        vnctl — Virtual Networking Controller        ║
+  ║                  version ${VNCTL_VERSION}                     ║
+  ╚══════════════════════════════════════════════════════╝
+
+  USAGE
+    vnctl <command> [subcommand] [options]
+
+  NETWORK COMMANDS
+    deploy   <topology> [--dry-run]    Deploy network topology
+    teardown <topology>                Tear down network topology
+    status   [topology]                Show network & VM status
+
+  VM COMMANDS
+    vm start   <name> [--bg] [-t topo] Launch a VM
+    vm stop    <name|all>              Stop VM(s)
+    vm list                            List running VMs
+    vm console <name>                  Attach to VM console
+
+  BENCHMARK COMMANDS
+    bench run     <topology>           Run full benchmark suite
+    bench run     --all                Benchmark all engines + compare
+    bench compare                      Generate OVS vs VPP comparison
+    bench stats   [topology]           Collect runtime stats
+
+  UTILITY COMMANDS
+    validate                           Validate all topology configs
+    doctor                             Check system readiness
+    --version                          Show version
+
+  TOPOLOGIES
+    linux-bridge (lb)     Linux kernel bridge (Task 1)
+    ovs                   Open vSwitch (Task 2)
+    vpp                   FD.io VPP (Task 3)
+    ovs-dpdk              OVS with DPDK userspace datapath
+
+  EXAMPLES
+    sudo ./vnctl deploy ovs
+    sudo ./vnctl vm start vm1
+    sudo ./vnctl vm start vm2 --bg
+    sudo ./vnctl bench run ovs
+    sudo ./vnctl bench run --all       # Run all engines + compare
+    sudo ./vnctl teardown ovs
+    ./vnctl doctor
+
+EOF
+}
+
+# ---------------------------------------------------------------------------
+# Main Dispatcher
+# ---------------------------------------------------------------------------
+
+main() {
+    local command="${1:-help}"
+    shift || true
+
+    case "$command" in
+        deploy)     cmd_deploy "$@" ;;
+        teardown)   cmd_teardown "$@" ;;
+        status)     cmd_status "$@" ;;
+        vm)         cmd_vm "$@" ;;
+        bench)      cmd_bench "$@" ;;
+        validate)   cmd_validate "$@" ;;
+        doctor)     cmd_doctor "$@" ;;
+        help|--help|-h)
+                    cmd_help ;;
+        --version|-v)
+                    echo "vnctl ${VNCTL_VERSION}" ;;
+        *)
+            log_error "Unknown command: '${command}'"
+            cmd_help
+            return 1
+            ;;
+    esac
+}
+
+main "$@"

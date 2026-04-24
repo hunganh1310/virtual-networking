@@ -1,0 +1,41 @@
+# ============================================================================
+# OVS Bridge Topology — Task 2 equivalent
+# ============================================================================
+# Architecture:
+#   VM1 (tap0) <---> ovs-br0 (OpenFlow) <---> (tap1) VM2
+#
+# Features:
+#   - OpenFlow-capable virtual switch
+#   - Kernel datapath (openvswitch.ko) for near line-rate forwarding
+#   - Flow table, VLAN, QoS, and tunnel support
+#
+# Deploy:   sudo ./vnctl deploy ovs
+# Teardown: sudo ./vnctl teardown ovs
+# ============================================================================
+
+engine: ovs
+
+bridge:
+  name: ovs-br0
+  ip: "10.0.0.254/24"
+  datapath: system                  # system (kernel) | netdev (DPDK userspace)
+  fail_mode: standalone             # standalone | secure (requires controller)
+  protocols: "OpenFlow13,OpenFlow15"
+
+vms:
+  vm1:
+    role: upf
+    mac: "52:54:00:00:00:01"
+    ip: "10.0.0.1/24"
+    tap: tap0
+    mode: foreground
+    image: vm1.qcow2
+  vm2:
+    role: gnodeb
+    mac: "52:54:00:00:00:02"
+    ip: "10.0.0.2/24"
+    tap: tap1
+    mode: background
+    console_port: 5556
+    monitor_port: 55501
+    image: vm2.qcow2

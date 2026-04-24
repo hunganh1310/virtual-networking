@@ -1,0 +1,54 @@
+# ============================================================================
+# VPP Bridge-Domain Topology — Task 3 equivalent
+# ============================================================================
+# Architecture:
+#   VM1 (tap0) <---> VPP (bridge-domain 10) <---> (tap1) VM2
+#
+# VPP creates host-side TAP interfaces and bridges them in a
+# L2 bridge-domain with MAC learning enabled.
+#
+# Features:
+#   - Vector Packet Processing (batch processing for throughput)
+#   - Userspace data plane (no kernel involvement in fast path)
+#   - L2 bridge-domain with learning, forwarding, and flooding
+#
+# Deploy:   sudo ./vnctl deploy vpp
+# Teardown: sudo ./vnctl teardown vpp
+# ============================================================================
+
+engine: vpp
+
+bridge_domain:
+  id: 10
+  learn: true
+  forward: true
+  flood: true
+  uu_flood: true
+  arp_term: false
+
+vpp_config:
+  startup_conf: "config/vpp/startup.conf"
+  log_file: "/tmp/vpp.log"
+  cli_socket: "/run/vpp/cli.sock"
+
+vms:
+  vm1:
+    role: upf
+    mac: "52:54:00:00:00:01"
+    ip: "10.0.0.1/24"
+    tap: vpp-tap0                   # VPP-side interface name
+    host_tap: tap0                  # Host-side (Linux namespace) name
+    mode: foreground
+    image: vm1.qcow2
+    ram: 512                        # Lower RAM — VPP needs host memory
+    vcpus: 1
+  vm2:
+    role: gnodeb
+    mac: "52:54:00:00:00:02"
+    ip: "10.0.0.2/24"
+    tap: vpp-tap1
+    host_tap: tap1
+    mode: foreground
+    image: vm2.qcow2
+    ram: 512
+    vcpus: 1

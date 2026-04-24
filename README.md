@@ -1,157 +1,179 @@
-# Virtual Networking in Telco
+# 🌐 Virtual Networking Lab — OVS & VPP Integration
 
-This repository contains a 3-part virtual networking lab for telco/NFV scenarios using:
+![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)
+![Platform](https://img.shields.io/badge/platform-Linux-lightgrey.svg)
+![License](https://img.shields.io/badge/license-Internal-red.svg)
 
-- Task 1: Linux Bridge + QEMU/KVM VMs
-- Task 2: Open vSwitch (OVS) + QEMU/KVM VMs
-- Task 3: VPP (Vector Packet Processing) workflow and measurement scripts
+A modular, automated, and high-performance virtual networking environment designed for benchmarking and architectural analysis of **Linux Bridge**, **Open vSwitch (OVS)**, and **FD.io VPP** data plane technologies in a Network Functions Virtualization (NFV) context.
 
-The scripts are designed for a Linux environment (for example openSUSE/Ubuntu or WSL2 with nested KVM).
+---
 
-## Repository Structure
+## 🏗️ Architecture
 
-```text
-.
-├── task1-qemu-kvm/
-│   └── scripts/
-│       ├── setup-network.sh
-│       ├── launch-vm1.sh
-│       ├── launch-vm2.sh
-│       └── cleanup.sh
-├── task2-ovs/
-│   ├── scripts/
-│   │   ├── setup-ovs-network.sh
-│   │   ├── launch-vm1-ovs.sh
-│   │   ├── launch-vm2-ovs.sh
-│   │   └── cleanup-ovs.sh
-│   └── results/
-│       └── ovs-benchmark.md
-├── scripts/
-│   └── preflight.sh
-└── task3-vpp/
-	├── config/
-	│   └── startup.conf
-	├── results/
-	└── scripts/
-		├── launch-vm1.sh
-		├── launch-vm2.sh
-		├── benchmark-vpp.sh
-		└── collect-vpp-stats.sh
+The project implements a strict separation between the **Control Plane** (orchestration logic) and the **Data Plane** (packet processing engines).
+
+```mermaid
+graph TD
+    subgraph Control_Plane ["Control Plane (Host)"]
+        vnctl["vnctl (Unified CLI)"]
+        YAML["Topology YAML"]
+        Lib["Shared Libraries (lib/)"]
+        vnctl --> YAML
+        vnctl --> Lib
+    end
+
+    subgraph Data_Plane ["Data Plane (Engines)"]
+        LB["Linux Bridge"]
+        OVS["Open vSwitch"]
+        VPP["FD.io VPP"]
+        
+        Lib --> LB
+        Lib --> OVS
+        Lib --> VPP
+    end
+
+    subgraph Workload ["Virtual Workloads"]
+        VM1["VM1 (UPF Role)"]
+        VM2["VM2 (gNB Role)"]
+        
+        LB <--> VM1 & VM2
+        OVS <--> VM1 & VM2
+        VPP <--> VM1 & VM2
+    end
 ```
 
-## Prerequisites
+---
 
-Install base tools:
+## 🚀 Quick Start
+
+### 1. Installation
+The lab is optimized for **openSUSE Tumbleweed** but compatible with most modern Linux distributions.
 
 ```bash
-sudo zypper install -y qemu-kvm iproute2 bridge-utils iperf3 telnet
+# Clone the repository
+git clone <repo-url> virtual-networking && cd virtual-networking
+
+# Install VPP (if needed)
+sudo ./scripts/install-vpp.sh
+
+# Configure HugePages (Required for VPP/DPDK performance)
+sudo ./scripts/setup-hugepages.sh --persistent
 ```
 
-Install/start OVS for Task 2:
-
+### 2. System Readiness
+Check if your environment supports KVM and required networking components:
 ```bash
-sudo zypper install -y openvswitch
-sudo systemctl enable --now openvswitch
+./vnctl doctor
 ```
 
-Install VPP for Task 3 (package/source depends on distro):
-
+### 3. Deployment Flow
 ```bash
-vpp -v
-vppctl -v
+# Deploy a topology (e.g., OVS)
+sudo ./vnctl deploy ovs
+
+# Launch VMs (Background mode recommended for benchmarking)
+sudo ./vnctl vm start vm1 --bg
+sudo ./vnctl vm start vm2 --bg
+
+# Check status
+./vnctl status ovs
+./vnctl vm list
 ```
 
-## Task 1: Linux Bridge + QEMU/KVM
+---
 
-From [task1-qemu-kvm/scripts/setup-network.sh](task1-qemu-kvm/scripts/setup-network.sh):
+## 📊 Performance Benchmarking
 
+The lab includes a professional-grade benchmarking framework that captures throughput (TCP/UDP), latency, and engine-specific telemetry.
+
+### Running Benchmarks
 ```bash
-cd task1-qemu-kvm/scripts
-sudo bash setup-network.sh
+# Run full suite on OVS
+sudo ./vnctl bench run ovs
+
+# Benchmark ALL engines sequentially and generate a comparison
+sudo ./vnctl bench run --all
 ```
 
-Launch VM1 in foreground:
-
+### Generating Reports
+View a color-coded comparison table in your terminal:
 ```bash
-./launch-vm1.sh
+sudo ./vnctl bench compare
 ```
 
-Launch VM2 in background:
+### Benchmark Methodology
+- **Tooling**: `iperf3` for throughput, `ping` for latency, `TRex` for RFC 2544 testing.
+- **Metrics**: 
+    - **TCP Throughput**: Maximum achievable Gbps.
+    - **UDP Packet Loss**: Loss % at a fixed target bitrate (e.g., 200 Mbps).
+    - **Latency**: Average Round-Trip Time (RTT) in milliseconds.
 
+---
+
+## 🛠️ Advanced Features
+
+### ⚡ DPDK Acceleration
+Switch to userspace packet processing for maximum performance:
+- **OVS-DPDK**: Uses `netdev` datapath (see `config/topology/ovs-dpdk.yaml`).
+- **VPP-DPDK**: Bypasses the kernel entirely (see `config/vpp/startup-dpdk.conf`).
+
+### 🤖 Cloud-Init Automation
+Eliminate manual VM configuration. Automatically inject IPs, hostnames, and SSH keys:
 ```bash
-./launch-vm2.sh
+# Generate seed ISOs for the OVS topology
+./cloud-init/gen-cidata.sh ovs all
 ```
 
-Cleanup:
-
+### 🦖 TRex Integration
+For advanced RFC 2544 testing (throughput sweep across frame sizes):
 ```bash
-sudo bash cleanup.sh
+# Run TRex profile (requires TRex installed)
+python3 benchmark/trex-profile.py --engine vpp
 ```
 
-## Task 2: Open vSwitch (OVS)
+---
 
-From [task2-ovs/scripts/setup-ovs-network.sh](task2-ovs/scripts/setup-ovs-network.sh):
+## 📂 Project Structure
 
-```bash
-cd task2-ovs/scripts
-sudo bash setup-ovs-network.sh
-```
+| Directory | Description |
+|-----------|-------------|
+| `vnctl` | **Main Entry Point**: Unified CLI for all operations. |
+| `config/` | **Topology & Settings**: YAML definitions and VPP startup configs. |
+| `lib/` | **Core Logic**: Shared libraries for Networking, VM lifecycle, and Parsing. |
+| `engine/` | **Backends**: Implementation of LB, OVS, and VPP deployment logic. |
+| `benchmark/` | **Performance**: Scripts for iperf3, TRex, and Report generation. |
+| `scripts/` | **Automation**: Installation and environment setup scripts. |
+| `docs/` | **Deep Dives**: Architecture, Tuning, and Benchmarking guides. |
 
-Launch VMs:
+---
 
-```bash
-./launch-vm1-ovs.sh
-./launch-vm2-ovs.sh
-```
+## 📜 Commands Reference
 
-Cleanup:
+| Command | Description |
+|---------|-------------|
+| `vnctl deploy <topo>` | Deploy network topology (lb, ovs, vpp, ovs-dpdk). |
+| `vnctl teardown <topo>` | Remove all network interfaces and bridges. |
+| `vnctl vm start <name>` | Launch a specific VM (use `--bg` for background). |
+| `vnctl vm stop <name\|all>` | Gracefully terminate VM processes. |
+| `vnctl bench run <topo\|--all>` | Execute performance tests. |
+| `vnctl bench compare` | Generate a multi-engine comparison report. |
+| `vnctl doctor` | Validate system prerequisites and dependencies. |
+| `vnctl validate` | Check YAML topology files for syntax errors. |
 
-```bash
-sudo bash cleanup-ovs.sh
-```
+---
 
-Benchmark report is available at [task2-ovs/results/ovs-benchmark.md](task2-ovs/results/ovs-benchmark.md).
+## ❓ FAQ
 
-## Task 3: VPP Workflow
+**Q: Why is VPP throughput lower than OVS in the virtual lab?**  
+A: In nested-KVM/WSL2, VPP often uses TAP interfaces which have context-switch overhead. To see VPP's true power, use DPDK on bare-metal.
 
-VPP startup config: [task3-vpp/config/startup.conf](task3-vpp/config/startup.conf)
+**Q: How do I access a background VM's console?**  
+A: Use `./vnctl vm console <vm_name>`. This connects via telnet to the VM's serial port.
 
-Launch VM pair for VPP scenario:
+**Q: Where are the test results saved?**  
+A: Look in `results/<engine>/<timestamp>/`. Each run includes JSON data, human-readable text, and engine stats.
 
-```bash
-cd task3-vpp/scripts
-./launch-vm1.sh
-./launch-vm2.sh
-```
+---
 
-Run benchmark from VM1 side:
-
-```bash
-./benchmark-vpp.sh
-```
-
-Collect VPP runtime/interface/error stats:
-
-```bash
-./collect-vpp-stats.sh
-```
-
-Task 3 output files are now standardized under [task3-vpp/results](task3-vpp/results).
-
-## Shared Preflight
-
-Shared preflight helpers are provided in [scripts/preflight.sh](scripts/preflight.sh) and are used by launch scripts across Task 1, Task 2, and Task 3.
-
-It validates:
-
-- Required binaries (for example `qemu-system-x86_64`)
-- Required files (images/kernel/initrd)
-- Required network interfaces (for example `tap0`, `tap1`)
-
-### Completed Improvements
-
-1. Replaced hardcoded workspace paths with script-relative path discovery in launch scripts.
-2. Added shared preflight checks (commands/files/interfaces) and integrated them across Task 1/2/3 launch scripts.
-3. Hardened OVS cleanup to handle missing/stale VM2 PID files gracefully.
-4. Made OVS bridge IP setup idempotent by flushing bridge IP before re-adding.
-5. Standardized Task 3 benchmark/stat outputs into a single directory: [task3-vpp/results](task3-vpp/results).
+**Developed for the Telco NFV Research Lab.**  
+*Maintained by the Network Software Engineering Team.*

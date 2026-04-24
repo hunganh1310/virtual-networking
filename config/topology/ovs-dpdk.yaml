@@ -1,0 +1,61 @@
+# ============================================================================
+# OVS DPDK Topology — DPDK userspace datapath (netdev)
+# ============================================================================
+# Architecture:
+#   VM1 (tap0) <---> ovs-br0 (netdev/DPDK userspace) <---> (tap1) VM2
+#
+# Difference from standard OVS topology:
+#   datapath: netdev — OVS uses DPDK poll-mode drivers instead of
+#             the kernel openvswitch.ko module. All packet I/O is
+#             handled in userspace by ovs-vswitchd.
+#
+# ⚠️  HARDWARE REQUIREMENTS (same as VPP DPDK):
+#   - Physical NIC bound to vfio-pci or igb_uio
+#   - HugePages allocated: sudo ./scripts/setup-hugepages.sh
+#   - IOMMU enabled in BIOS + kernel: intel_iommu=on
+#   - OVS built with DPDK support (check: ovs-vswitchd --version | grep DPDK)
+#
+# Activation:
+#   # Enable DPDK in OVS before deploying:
+#   sudo ovs-vsctl set Open_vSwitch . other_config:dpdk-init=true
+#   sudo ovs-vsctl set Open_vSwitch . other_config:dpdk-socket-mem="512,0"
+#
+# Deploy:   sudo ./vnctl deploy ovs-dpdk
+# Teardown: sudo ./vnctl teardown ovs-dpdk
+#
+# Reference: https://docs.openvswitch.org/en/latest/intro/install/dpdk/
+# ============================================================================
+
+engine: ovs
+
+bridge:
+  name: ovs-br0-dpdk
+  ip: "10.0.0.254/24"
+  datapath: netdev                  # netdev = DPDK userspace datapath
+  fail_mode: standalone
+  protocols: "OpenFlow13,OpenFlow15"
+
+# DPDK-specific OVS port configuration
+# When using DPDK physical NICs, replace 'tap' ports with 'dpdk' type ports.
+# For VM-to-VM via TAP (software path), use standard TAP as below.
+# For pure DPDK (NIC to NIC), use:
+#   ovs-vsctl add-port ovs-br0-dpdk dpdk0 -- set Interface dpdk0 type=dpdk
+#                                            options:dpdk-devargs=0000:01:00.0
+
+vms:
+  vm1:
+    role: upf
+    mac: "52:54:00:00:00:01"
+    ip: "10.0.0.1/24"
+    tap: tap0
+    mode: foreground
+    image: vm1.qcow2
+  vm2:
+    role: gnodeb
+    mac: "52:54:00:00:00:02"
+    ip: "10.0.0.2/24"
+    tap: tap1
+    mode: background
+    console_port: 5556
+    monitor_port: 55501
+    image: vm2.qcow2

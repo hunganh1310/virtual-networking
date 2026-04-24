@@ -1,0 +1,51 @@
+# ============================================================================
+# config/defaults.yaml — Global defaults for Virtual Networking project
+# ============================================================================
+# These values are used as fallbacks when a topology file does not specify
+# a particular setting. Topology-level values always take precedence.
+# ============================================================================
+
+project:
+  name: virtual-networking
+  root: auto                        # auto-detect from script location
+
+# ---------------------------------------------------------------------------
+# VM defaults — applied to all VMs unless overridden in topology
+# ---------------------------------------------------------------------------
+vm_defaults:
+  ram: 1024                         # MB
+  vcpus: 2
+  machine: "q35,accel=kvm"
+  cpu: host
+  disk_format: qcow2
+  disk_if: virtio
+  nic_model: virtio-net-pci
+  vhost: true
+  kernel_args: "console=ttyS0,115200 net.ifnames=0 biosdevname=0 hugepages=0 rw"
+
+# ---------------------------------------------------------------------------
+# Network defaults
+# ---------------------------------------------------------------------------
+network_defaults:
+  subnet: "10.0.0.0/24"
+  gateway_ip: "10.0.0.254"
+
+# ---------------------------------------------------------------------------
+# Path conventions (relative to PROJECT_ROOT)
+# ---------------------------------------------------------------------------
+paths:
+  images: "images"
+  boot: "boot"
+  results: "results"
+  pid_dir: "/tmp/vnctl"
+
+# ---------------------------------------------------------------------------
+# Benchmark defaults
+# ---------------------------------------------------------------------------
+benchmark:
+  tcp_duration: 30                  # seconds
+  udp_duration: 30
+  udp_bitrate: "200M"              # target bitrate for UDP test
+  parallel_streams: 4
+  latency_count: 100               # ping count
+  output_format: "json"            # json | text | both
