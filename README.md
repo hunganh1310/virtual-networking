@@ -161,19 +161,3 @@ python3 benchmark/trex-profile.py --engine vpp
 | `vnctl validate` | Check YAML topology files for syntax errors. |
 
 ---
-
-## ❓ FAQ
-
-**Q: Why is VPP throughput lower than OVS in the virtual lab?**  
-A: In nested-KVM/WSL2, VPP often uses TAP interfaces which have context-switch overhead. To see VPP's true power, use DPDK on bare-metal.
-
-**Q: How do I access a background VM's console?**  
-A: Use `./vnctl vm console <vm_name>`. This connects via telnet to the VM's serial port.
-
-**Q: Where are the test results saved?**  
-A: Look in `results/<engine>/<timestamp>/`. Each run includes JSON data, human-readable text, and engine stats.
-
----
-
-**Developed for the Telco NFV Research Lab.**  
-*Maintained by the Network Software Engineering Team.*
